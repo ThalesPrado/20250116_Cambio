@@ -219,8 +219,12 @@ def exibir_abas():
         else:
             exportadores_filtrados = exportadores_selecionados
 
-        status_bool_map = {"Feito": True, "Não feito": False}
-        status_filtrados = [status_bool_map[s] for s in status_selecionado]
+        status_bool_map = {"Feito": True, "Nao feito": False}
+        try:
+            status_filtrados = [status_bool_map[s] for s in status_selecionado]
+        except KeyError:
+            st.error("Erro: valor de status inválido selecionado.")
+            return
 
         base_filtrada = base[
             (base["Empresa"].isin(empresas_filtradas)) &
@@ -311,4 +315,5 @@ def exibir_abas():
 # Executa o aplicativo
 if __name__ == "__main__":
     exibir_abas()
+
 
