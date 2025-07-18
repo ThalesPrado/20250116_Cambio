@@ -32,7 +32,7 @@ def carregar_base(file):
             raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls ou .csv.")
         
         if "Cambio_Fechado" in df.columns:
-            df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(lambda x: True if str(x).strip().lower() == "feito" else False)
+            df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(lambda x: True if str(x).strip().lower() == "Feito" else False)
         else:
             df["Cambio_Fechado"] = False
         
@@ -81,7 +81,7 @@ def salvar_combinacao_excel(combinacoes):
 def salvar_base_atualizada(base):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        base["Cambio_Fechado"] = base["Cambio_Fechado"].apply(lambda x: "Feito" if x else "Não feito")
+        base["Cambio_Fechado"] = base["Cambio_Fechado"].apply(lambda x: "Feito" if x else "Nao feito")
         base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
     output.seek(0)
     return output
@@ -203,11 +203,11 @@ def exibir_abas():
 
         empresas_opcoes = ["Todas"] + list(empresas)
         exportadores_opcoes = ["Todos"] + list(exportadores)
-        status_opcoes = ["Feito", "Não feito"]
+        status_opcoes = ["Feito", "Nao feito"]
 
         empresas_selecionadas = st.multiselect("Selecione empresa(s):", empresas_opcoes, default="Todas")
         exportadores_selecionados = st.multiselect("Selecione exportador(es):", exportadores_opcoes, default="Todos")
-        status_selecionado = st.multiselect("Selecione o status dos processos:", status_opcoes, default="Não feito")
+        status_selecionado = st.multiselect("Selecione o status dos processos:", status_opcoes, default="Nao feito")
 
         if "Todas" in empresas_selecionadas:
             empresas_filtradas = empresas
