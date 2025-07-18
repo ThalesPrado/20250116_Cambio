@@ -295,6 +295,7 @@ def exibir_abas():
         else:
             st.info("Nenhum processo fechado até o momento.")
 
+
     elif escolha == "Notificações":
         st.header("Notificações")
         st.subheader("⚠️ Processos com mais de 180 dias em aberto")
