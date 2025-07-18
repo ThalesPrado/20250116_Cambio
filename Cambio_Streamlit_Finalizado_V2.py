@@ -31,7 +31,6 @@ def carregar_base(file):
         else:
             raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls ou .csv.")
         
-        # Garante consistência na coluna Cambio_Fechado com valores booleanos internos
         if "Cambio_Fechado" in df.columns:
             df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(lambda x: True if str(x).strip().lower() == "feito" else False)
         else:
@@ -125,7 +124,7 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
     dados_filtrados = base[
         (base["Empresa"] == empresa) &
         (base["Exportador"] == exportador) &
-        (base["Cambio_Fechado"] == False)  # Exclui processos fechados
+        (base["Cambio_Fechado"] == False)
     ]
     valores_processos = dados_filtrados[["Processo", "Valor", "Data"]].values
 
@@ -153,7 +152,6 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
 def exibir_abas():
     st.title("Ferramenta de Fechamento de Câmbio")
 
-    # Login simples
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
 
@@ -168,13 +166,11 @@ def exibir_abas():
                 st.error("Usuário ou senha incorretos.")
         return
 
-    # Upload do arquivo
     file = st.sidebar.file_uploader("Faça upload do arquivo (.xlsx, .xls, .csv)", type=["xlsx", "xls", "csv"])
     if not file:
         st.warning("Por favor, carregue um arquivo para começar.")
         return
 
-    # Carregar e preparar base
     if "base" not in st.session_state:
         base = carregar_base(file)
         base = verificar_processos_dias_aberto(base)
@@ -192,7 +188,7 @@ def exibir_abas():
 
     if escolha == "Operações":
         st.header("Operações")
-        st.dataframe(base)
+        st.dataframe(base.drop(columns=["Cambio_Fechado"], errors='ignore'))
 
     elif escolha == "Gráficos":
         st.header("Gráficos de Processos")
@@ -207,7 +203,7 @@ def exibir_abas():
 
         empresas_opcoes = ["Todas"] + list(empresas)
         exportadores_opcoes = ["Todos"] + list(exportadores)
-        status_opcoes = ["Feito", "Não feito"]  # Novo filtro
+        status_opcoes = ["Feito", "Não feito"]
 
         empresas_selecionadas = st.multiselect("Selecione empresa(s):", empresas_opcoes, default="Todas")
         exportadores_selecionados = st.multiselect("Selecione exportador(es):", exportadores_opcoes, default="Todos")
@@ -315,3 +311,4 @@ def exibir_abas():
 # Executa o aplicativo
 if __name__ == "__main__":
     exibir_abas()
+
