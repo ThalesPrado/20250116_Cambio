@@ -30,12 +30,15 @@ def carregar_base(file):
             df = pd.read_csv(file)
         else:
             raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls ou .csv.")
-        
+
+        # Garante que Cambio_Fechado seja booleano
         if "Cambio_Fechado" in df.columns:
-            df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(lambda x: True if str(x).strip().lower() == "Feito" else False)
+            df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(
+                lambda x: True if str(x).strip().lower() in ["feito", "true", "1"] else False
+            )
         else:
             df["Cambio_Fechado"] = False
-        
+
         return df
     except Exception as e:
         raise ValueError(f"Erro ao carregar o arquivo: {e}")
@@ -77,11 +80,10 @@ def salvar_combinacao_excel(combinacoes):
     output.seek(0)
     return output
 
-# Função para salvar a base atualizada (com flag de câmbio fechado)
+# Função para salvar a base atualizada (mantendo Cambio_Fechado como booleano)
 def salvar_base_atualizada(base):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        base["Cambio_Fechado"] = base["Cambio_Fechado"].apply(lambda x: "Feito" if x else "Nao feito")
         base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
     output.seek(0)
     return output
@@ -90,7 +92,7 @@ def salvar_base_atualizada(base):
 def gerar_grafico_dias_aberto(base):
     intervalos = [0, 30, 60, 90, 120, 150, 180, float("inf")]
     labels = ["0-30", "30-60", "60-90", "90-120", "120-150", "150-180", ">180"]
-    
+
     base["Intervalo_Dias"] = pd.cut(
         base["Dias_Em_Aberto"], bins=intervalos, labels=labels, right=False
     )
@@ -244,11 +246,7 @@ def exibir_abas():
             if st.session_state.resultados:
                 st.success(f"{len(st.session_state.resultados)} combinações encontradas.")
                 st.session_state.resultado_df = pd.DataFrame(st.session_state.resultados)
-                st.dataframe(
-                    st.session_state.resultado_df.style.applymap(
-                        lambda val: "background-color: #ffcccc" if val in base[base["Cambio_Fechado"]]["Processo"].tolist() else ""
-                    )
-                )
+                st.dataframe(st.session_state.resultado_df)
             else:
                 st.warning("Nenhuma combinação encontrada.")
 
@@ -281,7 +279,7 @@ def exibir_abas():
     elif escolha == "Notificações":
         st.header("Notificações")
         st.subheader("⚠️ Processos com mais de 180 dias em aberto")
-        processos_pendentes = base[(base["Dias_Em_Aberto"] > 180) & (~base["Cambio_Fechado"])]
+        processos_pendentes = base[(base["Dias_Em_Aberto"] > 180) & (base["Cambio_Fechado"] == False)]
         if not processos_pendentes.empty:
             st.warning("Atenção! Existem processos com mais de 180 dias em aberto:")
             st.dataframe(processos_pendentes)
@@ -289,7 +287,7 @@ def exibir_abas():
             st.info("Nenhum processo acima de 180 dias em aberto.")
 
         st.subheader("📦 Processos Já Fechados")
-        processos_fechados = base[base["Cambio_Fechado"]]
+        processos_fechados = base[base["Cambio_Fechado"] == True]
         if not processos_fechados.empty:
             st.dataframe(processos_fechados)
         else:
@@ -298,5 +296,6 @@ def exibir_abas():
 # Executa o aplicativo
 if __name__ == "__main__":
     exibir_abas()
+
 
 
