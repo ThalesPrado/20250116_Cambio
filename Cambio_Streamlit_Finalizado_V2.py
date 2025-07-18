@@ -3,7 +3,7 @@ import pandas as pd
 from itertools import combinations
 from io import BytesIO
 from openpyxl import Workbook
-from datetime import datetime, timedelta
+from datetime import datetime
 import matplotlib.pyplot as plt
 
 # Configuração inicial do Streamlit
@@ -22,15 +22,18 @@ def validar_arquivo(file):
 def carregar_base(file):
     validar_arquivo(file)
     try:
-        if file.name.endswith(".xlsx") or file.name.endswith(".xls"):
-            base = pd.ExcelFile(file, engine="openpyxl")
-            if "Base_Unificada" not in base.sheet_names:
-                raise ValueError("A aba 'Base_Unificada' não foi encontrada no arquivo.")
-            return base.parse(sheet_name="Base_Unificada")
+        if file.name.endswith((".xlsx", ".xls")):
+            base = pd.read_excel(file, sheet_name=None, engine="openpyxl")
+            sheet = st.selectbox("Selecione a aba:", list(base.keys()))
+            df = base[sheet]
         elif file.name.endswith(".csv"):
-            return pd.read_csv(file)
+            df = pd.read_csv(file)
         else:
             raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls ou .csv.")
+        
+        if "Cambio_Fechado" not in df.columns:
+            df["Cambio_Fechado"] = False  # Adiciona coluna flag se não existir
+        return df
     except Exception as e:
         raise ValueError(f"Erro ao carregar o arquivo: {e}")
 
@@ -38,28 +41,44 @@ def carregar_base(file):
 def listar_empresas(base):
     return base["Empresa"].dropna().unique()
 
+# Função para listar exportadores
+def listar_exportadores(base):
+    return base["Exportador"].dropna().unique()
+
 # Função para verificar processos e dias em aberto
 def verificar_processos_dias_aberto(base):
     hoje = datetime.now()
     base["Data"] = pd.to_datetime(base["Data"], errors="coerce")
-    base["Dias_Em_Aberto"] = (hoje - base["Data"]).dt.days
-    base["Dias_Em_Aberto"] = base["Dias_Em_Aberto"].clip(lower=0)  # Evita valores negativos
+    base["Dias_Em_Aberto"] = (hoje - base["Data"]).dt.days.clip(lower=0)
     return base
 
-# Função para salvar combinações em um arquivo Excel
+# Função para salvar combinações em Excel
 def salvar_combinacao_excel(combinacoes):
     output = BytesIO()
     wb = Workbook()
     ws = wb.active
     ws.title = "Sumário de Combinações"
 
-    ws.append(["Processos", "Datas", "Total"])
+    ws.append(["Empresa", "Exportador", "Processos", "Datas", "Total"])
 
     for combinacao in combinacoes:
-        ws.append([', '.join(map(str, combinacao['Processos'])), 
-                   ', '.join(combinacao['Datas']), combinacao['Total']])
+        ws.append([
+            combinacao['Empresa'],
+            combinacao['Exportador'],
+            ', '.join(map(str, combinacao['Processos'])),
+            ', '.join(combinacao['Datas']),
+            combinacao['Total']
+        ])
 
     wb.save(output)
+    output.seek(0)
+    return output
+
+# Função para salvar a base atualizada (com flag de câmbio fechado)
+def salvar_base_atualizada(base):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
     output.seek(0)
     return output
 
@@ -74,13 +93,11 @@ def gerar_grafico_dias_aberto(base):
 
     processos_por_intervalo = base.groupby(["Empresa", "Intervalo_Dias"]).size().unstack(fill_value=0)
 
-    # Criar o gráfico
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(12, 6))
     processos_por_intervalo.plot(kind="bar", stacked=True, figsize=(12, 6))
     plt.title("Total de Processos por Intervalo de Dias em Aberto e Empresa")
     plt.xlabel("Empresa")
     plt.ylabel("Total de Processos")
-    plt.legend(title="Intervalos de Dias em Aberto")
     plt.xticks(rotation=45)
     plt.tight_layout()
     st.pyplot(plt)
@@ -89,7 +106,6 @@ def gerar_grafico_dias_aberto(base):
 def gerar_grafico_total_processos(base):
     total_por_empresa = base["Empresa"].value_counts()
 
-    # Criar o gráfico
     plt.figure(figsize=(10, 6))
     total_por_empresa.plot(kind="bar", color="skyblue")
     plt.title("Total de Processos por Empresa")
@@ -99,57 +115,46 @@ def gerar_grafico_total_processos(base):
     plt.tight_layout()
     st.pyplot(plt)
 
-# Função para encontrar combinações
-def encontrar_combinacoes(base, empresa, valor_alvo, margem_fixa=1500, max_combinacoes=5):
-    dados_filtrados = base[base["Empresa"] == empresa]
+# Função para encontrar combinações (ignora processos fechados)
+def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=1500, max_combinacoes=5):
+    dados_filtrados = base[
+        (base["Empresa"] == empresa) &
+        (base["Exportador"] == exportador) &
+        (base["Cambio_Fechado"] == False)  # Exclui processos fechados
+    ]
     valores_processos = dados_filtrados[["Processo", "Valor", "Data"]].values
 
     margem_min = valor_alvo - margem_fixa
     margem_max = valor_alvo + margem_fixa
 
     combinacoes_possiveis = []
-    valor_exato_encontrado = False
 
     for r in range(1, len(valores_processos) + 1):
         for combinacao in combinations(valores_processos, r):
             soma = sum([item[1] for item in combinacao])
-            if soma == valor_alvo:
-                valor_exato_encontrado = True
             if margem_min <= soma <= margem_max:
-                combinacoes_possiveis.append(combinacao)
+                combinacoes_possiveis.append({
+                    "Empresa": empresa,
+                    "Exportador": exportador,
+                    "Processos": [item[0] for item in combinacao],
+                    "Datas": [item[2].strftime('%Y-%m-%d') if pd.notna(item[2]) else 'Data Inválida' for item in combinacao],
+                    "Total": soma
+                })
                 if len(combinacoes_possiveis) >= max_combinacoes:
-                    return {"combinacoes": combinacoes_possiveis, "valor_exato": valor_exato_encontrado}
-
-    return {"combinacoes": combinacoes_possiveis, "valor_exato": valor_exato_encontrado}
-
-# Função para formatar resultados de combinações
-def formatar_resultados(resultado):
-    combinacoes = resultado["combinacoes"]
-    valor_exato = resultado["valor_exato"]
-
-    if combinacoes:
-        resultado_formatado = []
-        for comb in combinacoes:
-            processos = [item[0] for item in comb]
-            total = sum([item[1] for item in comb])
-            datas = [item[2].strftime('%Y-%m-%d') if pd.notna(item[2]) and hasattr(item[2], 'strftime') else 'Data Inválida' for item in comb]
-            resultado_formatado.append({'Processos': processos, 'Datas': datas, 'Total': total})
-
-        return pd.DataFrame(resultado_formatado), valor_exato
-    return None, valor_exato
+                    return combinacoes_possiveis
+    return combinacoes_possiveis
 
 # Função principal para exibição de abas no Streamlit
 def exibir_abas():
     st.title("Ferramenta de Fechamento de Câmbio")
 
-    # Sistema de Login
+    # Login simples
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
 
     if not st.session_state.autenticado:
         usuario = st.text_input("Usuário:")
         senha = st.text_input("Senha:", type="password")
-
         if st.button("Login"):
             if usuario == "icaro" and senha == "gocomexx25":
                 st.session_state.autenticado = True
@@ -160,15 +165,18 @@ def exibir_abas():
 
     # Upload do arquivo
     file = st.sidebar.file_uploader("Faça upload do arquivo (.xlsx, .xls, .csv)", type=["xlsx", "xls", "csv"])
-
     if not file:
         st.warning("Por favor, carregue um arquivo para começar.")
         return
 
-    base = carregar_base(file)
-    base = verificar_processos_dias_aberto(base)
+    # Carregar e preparar base
+    if "base" not in st.session_state:
+        base = carregar_base(file)
+        base = verificar_processos_dias_aberto(base)
+        st.session_state.base = base
 
-    # Estatísticas gerais
+    base = st.session_state.base
+
     st.sidebar.subheader("Resumo Geral")
     st.sidebar.metric("Total de Empresas", len(listar_empresas(base)))
     st.sidebar.metric("Total de Processos", len(base))
@@ -179,73 +187,119 @@ def exibir_abas():
 
     if escolha == "Operações":
         st.header("Operações")
-        st.dataframe(base)
+        base_display = base.copy()
+        base_display["Status"] = base_display["Cambio_Fechado"].apply(lambda x: "Fechado" if x else "Aberto")
+        st.dataframe(base_display)
 
     elif escolha == "Gráficos":
-        st.header("Gráficos de Processos por Intervalo de Dias")
+        st.header("Gráficos de Processos")
         gerar_grafico_dias_aberto(base)
-
-        st.header("Gráfico de Total de Processos por Empresa")
         gerar_grafico_total_processos(base)
 
     elif escolha == "Fechamento de Câmbio":
         st.header("Fechamento de Câmbio")
 
         empresas = listar_empresas(base)
-        empresa_selecionada = st.selectbox("Selecione uma empresa:", empresas)
+        exportadores = listar_exportadores(base)
+
+        empresas_opcoes = ["Todas"] + list(empresas)
+        exportadores_opcoes = ["Todos"] + list(exportadores)
+
+        empresas_selecionadas = st.multiselect("Selecione empresa(s):", empresas_opcoes, default="Todas")
+        exportadores_selecionados = st.multiselect("Selecione exportador(es):", exportadores_opcoes, default="Todos")
+
+        if "Todas" in empresas_selecionadas:
+            empresas_filtradas = empresas
+        else:
+            empresas_filtradas = empresas_selecionadas
+
+        if "Todos" in exportadores_selecionados:
+            exportadores_filtrados = exportadores
+        else:
+            exportadores_filtrados = exportadores_selecionados
+
         valor_alvo = st.number_input("Digite o valor alvo para fechamento:", min_value=0.0, step=0.01)
 
         if st.button("Buscar Combinações"):
-            with st.spinner("Buscando combinações..."):
-                resultado = encontrar_combinacoes(base, empresa_selecionada, valor_alvo)
+            st.session_state.resultados = []
+            for empresa in empresas_filtradas:
+                for exportador in exportadores_filtrados:
+                    combinacoes = encontrar_combinacoes(base, empresa, exportador, valor_alvo)
+                    st.session_state.resultados.extend(combinacoes)
 
-            resultado_df, valor_exato = formatar_resultados(resultado)
-
-            if resultado_df is not None and not resultado_df.empty:
-                st.session_state.resultado_df = resultado_df
-                st.success("Combinações encontradas com sucesso!")
+            if st.session_state.resultados:
+                st.success(f"{len(st.session_state.resultados)} combinações encontradas.")
+                st.session_state.resultado_df = pd.DataFrame(st.session_state.resultados)
+                # Marca visualmente os processos já usados
+                st.dataframe(
+                    st.session_state.resultado_df.style.applymap(
+                        lambda val: "background-color: #ffcccc" if val in base[base["Cambio_Fechado"]]["Processo"].tolist() else ""
+                    )
+                )
             else:
                 st.warning("Nenhuma combinação encontrada.")
 
-        if "resultado_df" in st.session_state and not st.session_state.resultado_df.empty:
-            st.dataframe(st.session_state.resultado_df)
+        if "resultado_df" in st.session_state:
+            selecionadas = st.multiselect(
+                "Selecione as combinações para dar baixa:",
+                st.session_state.resultado_df.index.tolist(),
+                format_func=lambda x: f"Combinação {x + 1}"
+            )
 
-            if "combinacoes_selecionadas" not in st.session_state:
-                st.session_state.combinacoes_selecionadas = []
+            if st.button("Dar baixa"):
+                processos_a_atualizar = []
+                for idx in selecionadas:
+                    processos_a_atualizar.extend(st.session_state.resultado_df.iloc[idx]["Processos"])
 
-            combinacao_selecionada = st.multiselect("Selecione uma ou mais combinações:", 
-                                                     st.session_state.resultado_df.index.tolist(), 
-                                                     format_func=lambda x: f"Combinação {x+1}")
+                # Marca os processos como fechados
+                st.session_state.base.loc[
+                    st.session_state.base["Processo"].isin(processos_a_atualizar),
+                    "Cambio_Fechado"
+                ] = True
 
-            if st.button("Adicionar ao Sumário"):
-                for idx in combinacao_selecionada:
-                    if st.session_state.resultado_df.iloc[idx].to_dict() not in st.session_state.combinacoes_selecionadas:
-                        st.session_state.combinacoes_selecionadas.append(st.session_state.resultado_df.iloc[idx].to_dict())
-                        st.success(f"Combinação {idx + 1} adicionada ao sumário!")
+                st.success("Processos marcados como fechados. Eles não aparecerão mais em novas combinações.")
+
+                # Oferece download da base atualizada
+                base_atualizada = salvar_base_atualizada(st.session_state.base)
+                st.download_button(
+                    "Baixar Base Atualizada",
+                    base_atualizada,
+                    file_name=f"base_atualizada_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
+                )
 
     elif escolha == "Sumário de Câmbio":
         st.header("Sumário de Câmbio")
+        if "resultado_df" in st.session_state:
+            st.subheader("Combinações Encontradas")
+            st.dataframe(
+                st.session_state.resultado_df.style.applymap(
+                    lambda val: "background-color: #ffcccc" if val in base[base["Cambio_Fechado"]]["Processo"].tolist() else ""
+                )
+            )
 
-        if "combinacoes_selecionadas" in st.session_state and st.session_state.combinacoes_selecionadas:
-            st.subheader("Tabela de Fechamentos Selecionados")
-            combinacoes_df = pd.DataFrame(st.session_state.combinacoes_selecionadas)
-            st.dataframe(combinacoes_df)
-
-            output = salvar_combinacao_excel(st.session_state.combinacoes_selecionadas)
-            file_name = f"sumario_cambio_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
-            st.download_button("Baixar Sumário de Câmbio", output, file_name)
+        st.subheader("Processos Já Fechados")
+        processos_fechados = base[base["Cambio_Fechado"] == True]
+        if not processos_fechados.empty:
+            st.dataframe(processos_fechados)
         else:
-            st.info("Nenhuma combinação foi selecionada ainda.")
+            st.info("Nenhum processo fechado até o momento.")
 
     elif escolha == "Notificações":
-        st.header("Notificações de Processos")
-        processos_pendentes = base[base["Dias_Em_Aberto"] > 180]
-
+        st.header("Notificações")
+        st.subheader("⚠️ Processos com mais de 180 dias em aberto")
+        processos_pendentes = base[(base["Dias_Em_Aberto"] > 180) & (base["Cambio_Fechado"] == False)]
         if not processos_pendentes.empty:
-            st.warning("Atenção! Existem processos que ultrapassaram 180 dias em aberto:")
+            st.warning("Atenção! Existem processos com mais de 180 dias em aberto:")
             st.dataframe(processos_pendentes)
         else:
-            st.info("Todos os processos estão dentro do prazo.")
+            st.info("Nenhum processo acima de 180 dias em aberto.")
+
+        st.subheader("📦 Processos Já Fechados")
+        processos_fechados = base[base["Cambio_Fechado"] == True]
+        if not processos_fechados.empty:
+            st.dataframe(processos_fechados)
+        else:
+            st.info("Nenhum processo fechado até o momento.")
 
 # Executa o aplicativo
 if __name__ == "__main__":
