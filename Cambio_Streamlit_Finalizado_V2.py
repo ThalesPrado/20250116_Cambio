@@ -33,7 +33,8 @@ def carregar_base(file):
         
         if "Cambio_Fechado" not in df.columns:
             df["Cambio_Fechado"] = False  # Adiciona coluna flag se não existir
-        df["Status"] = df["Cambio_Fechado"].apply(lambda x: "Fechado" if x else "Aberto")
+        else:
+            df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(lambda x: True if str(x).strip().lower() == "feito" else False)
         return df
     except Exception as e:
         raise ValueError(f"Erro ao carregar o arquivo: {e}")
@@ -79,6 +80,7 @@ def salvar_combinacao_excel(combinacoes):
 def salvar_base_atualizada(base):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        base["Cambio_Fechado"] = base["Cambio_Fechado"].apply(lambda x: "Feito" if x else "Não feito")
         base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
     output.seek(0)
     return output
@@ -189,6 +191,7 @@ def exibir_abas():
     if escolha == "Operações":
         st.header("Operações")
         base_display = base.copy()
+        base_display["Status"] = base_display["Cambio_Fechado"].apply(lambda x: "Feito" if x else "Não feito")
         st.dataframe(base_display)
 
     elif escolha == "Gráficos":
@@ -204,27 +207,37 @@ def exibir_abas():
 
         empresas_opcoes = ["Todas"] + list(empresas)
         exportadores_opcoes = ["Todos"] + list(exportadores)
-        status_opcoes = ["Todos", "Aberto", "Fechado"]
+        status_opcoes = ["Feito", "Não feito"]  # Novo filtro
 
         empresas_selecionadas = st.multiselect("Selecione empresa(s):", empresas_opcoes, default="Todas")
         exportadores_selecionados = st.multiselect("Selecione exportador(es):", exportadores_opcoes, default="Todos")
-        status_selecionado = st.multiselect("Selecione o status do processo:", status_opcoes, default="Todos")
+        status_selecionado = st.multiselect("Selecione o status dos processos:", status_opcoes, default="Não feito")
 
-        # Aplicar filtros
-        base_filtrada = base.copy()
-        if "Todas" not in empresas_selecionadas:
-            base_filtrada = base_filtrada[base_filtrada["Empresa"].isin(empresas_selecionadas)]
-        if "Todos" not in exportadores_selecionados:
-            base_filtrada = base_filtrada[base_filtrada["Exportador"].isin(exportadores_selecionados)]
-        if "Todos" not in status_selecionado:
-            base_filtrada = base_filtrada[base_filtrada["Status"].isin(status_selecionado)]
+        if "Todas" in empresas_selecionadas:
+            empresas_filtradas = empresas
+        else:
+            empresas_filtradas = empresas_selecionadas
+
+        if "Todos" in exportadores_selecionados:
+            exportadores_filtrados = exportadores
+        else:
+            exportadores_filtrados = exportadores_selecionados
+
+        status_bool_map = {"Feito": True, "Não feito": False}
+        status_filtrados = [status_bool_map[s] for s in status_selecionado]
+
+        base_filtrada = base[
+            (base["Empresa"].isin(empresas_filtradas)) &
+            (base["Exportador"].isin(exportadores_filtrados)) &
+            (base["Cambio_Fechado"].isin(status_filtrados))
+        ]
 
         valor_alvo = st.number_input("Digite o valor alvo para fechamento:", min_value=0.0, step=0.01)
 
         if st.button("Buscar Combinações"):
             st.session_state.resultados = []
-            for empresa in base_filtrada["Empresa"].unique():
-                for exportador in base_filtrada["Exportador"].unique():
+            for empresa in empresas_filtradas:
+                for exportador in exportadores_filtrados:
                     combinacoes = encontrar_combinacoes(base_filtrada, empresa, exportador, valor_alvo)
                     st.session_state.resultados.extend(combinacoes)
 
@@ -255,7 +268,6 @@ def exibir_abas():
                     st.session_state.base["Processo"].isin(processos_a_atualizar),
                     "Cambio_Fechado"
                 ] = True
-                st.session_state.base["Status"] = st.session_state.base["Cambio_Fechado"].apply(lambda x: "Fechado" if x else "Aberto")
 
                 st.success("Processos marcados como fechados. Eles não aparecerão mais em novas combinações.")
 
