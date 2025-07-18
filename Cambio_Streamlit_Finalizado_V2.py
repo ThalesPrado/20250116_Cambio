@@ -183,7 +183,7 @@ def exibir_abas():
     st.sidebar.metric("Total de Processos", len(base))
     st.sidebar.metric("Dias Médios em Aberto", int(base["Dias_Em_Aberto"].mean()))
 
-    abas = ["Operações", "Fechamento de Câmbio", "Gráficos", "Notificações", "Sumário de Câmbio"]
+    abas = ["Operações", "Fechamento de Câmbio", "Gráficos", "Notificações"]
     escolha = st.sidebar.radio("Navegar", abas)
 
     if escolha == "Operações":
@@ -278,28 +278,10 @@ def exibir_abas():
                     file_name=f"base_atualizada_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
                 )
 
-    elif escolha == "Sumário de Câmbio":
-        st.header("Sumário de Câmbio")
-        if "resultado_df" in st.session_state:
-            st.subheader("Combinações Encontradas")
-            st.dataframe(
-                st.session_state.resultado_df.style.applymap(
-                    lambda val: "background-color: #ffcccc" if val in base[base["Cambio_Fechado"]]["Processo"].tolist() else ""
-                )
-            )
-
-        st.subheader("Processos Já Fechados")
-        processos_fechados = base[base["Cambio_Fechado"] == True]
-        if not processos_fechados.empty:
-            st.dataframe(processos_fechados)
-        else:
-            st.info("Nenhum processo fechado até o momento.")
-
-
     elif escolha == "Notificações":
         st.header("Notificações")
         st.subheader("⚠️ Processos com mais de 180 dias em aberto")
-        processos_pendentes = base[(base["Dias_Em_Aberto"] > 180) & (base["Cambio_Fechado"] == False)]
+        processos_pendentes = base[(base["Dias_Em_Aberto"] > 180) & (~base["Cambio_Fechado"])]
         if not processos_pendentes.empty:
             st.warning("Atenção! Existem processos com mais de 180 dias em aberto:")
             st.dataframe(processos_pendentes)
@@ -307,7 +289,7 @@ def exibir_abas():
             st.info("Nenhum processo acima de 180 dias em aberto.")
 
         st.subheader("📦 Processos Já Fechados")
-        processos_fechados = base[base["Cambio_Fechado"] == True]
+        processos_fechados = base[base["Cambio_Fechado"]]
         if not processos_fechados.empty:
             st.dataframe(processos_fechados)
         else:
