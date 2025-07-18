@@ -31,10 +31,12 @@ def carregar_base(file):
         else:
             raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls ou .csv.")
         
-        if "Cambio_Fechado" not in df.columns:
-            df["Cambio_Fechado"] = False  # Adiciona coluna flag se não existir
-        else:
+        # Garante consistência na coluna Cambio_Fechado com valores booleanos internos
+        if "Cambio_Fechado" in df.columns:
             df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(lambda x: True if str(x).strip().lower() == "feito" else False)
+        else:
+            df["Cambio_Fechado"] = False
+        
         return df
     except Exception as e:
         raise ValueError(f"Erro ao carregar o arquivo: {e}")
@@ -190,9 +192,7 @@ def exibir_abas():
 
     if escolha == "Operações":
         st.header("Operações")
-        base_display = base.copy()
-        base_display["Status"] = base_display["Cambio_Fechado"].apply(lambda x: "Feito" if x else "Não feito")
-        st.dataframe(base_display)
+        st.dataframe(base)
 
     elif escolha == "Gráficos":
         st.header("Gráficos de Processos")
