@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from itertools import combinations
 from io import BytesIO
-from openpyxl import Workbook
+from openpyxl import load_workbook
 from datetime import datetime
 import matplotlib.pyplot as plt
 
@@ -15,21 +15,22 @@ st.set_page_config(
 
 # Função para validar o arquivo
 def validar_arquivo(file):
-    if not file.name.endswith((".xlsx", ".xls", ".csv")):
-        raise ValueError("O arquivo deve estar nos formatos .xlsx, .xls ou .csv.")
+    if not file.name.endswith((".xlsx", ".xls", ".xlsm", ".csv")):
+        raise ValueError("O arquivo deve estar nos formatos .xlsx, .xls, .xlsm ou .csv.")
 
 # Função para carregar a base de dados
 def carregar_base(file):
     validar_arquivo(file)
     try:
-        if file.name.endswith((".xlsx", ".xls")):
+        if file.name.endswith((".xlsx", ".xls", ".xlsm")):
+            # openpyxl carrega .xlsm mantendo macros
             base = pd.read_excel(file, sheet_name=None, engine="openpyxl")
             sheet = st.selectbox("Selecione a aba:", list(base.keys()))
             df = base[sheet]
         elif file.name.endswith(".csv"):
             df = pd.read_csv(file)
         else:
-            raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls ou .csv.")
+            raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls, .xlsm ou .csv.")
 
         # Garante que Cambio_Fechado seja booleano
         if "Cambio_Fechado" in df.columns:
@@ -38,6 +39,21 @@ def carregar_base(file):
             )
         else:
             df["Cambio_Fechado"] = False
+
+        # Garante que 'Valor' seja numérico e remove inválidos
+        if "Valor" in df.columns:
+            df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
+        else:
+            raise ValueError("A coluna 'Valor' não foi encontrada no arquivo.")
+
+        # Substitui valores inválidos na coluna 'Data' com NaT
+        if "Data" in df.columns:
+            df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+        else:
+            raise ValueError("A coluna 'Data' não foi encontrada no arquivo.")
+
+        # Remove linhas com Valor inválido
+        df = df.dropna(subset=["Valor"])
 
         return df
     except Exception as e:
@@ -54,37 +70,28 @@ def listar_exportadores(base):
 # Função para verificar processos e dias em aberto
 def verificar_processos_dias_aberto(base):
     hoje = datetime.now()
-    base["Data"] = pd.to_datetime(base["Data"], errors="coerce")
     base["Dias_Em_Aberto"] = (hoje - base["Data"]).dt.days.clip(lower=0)
     return base
 
-# Função para salvar combinações em Excel
-def salvar_combinacao_excel(combinacoes):
+# Função para salvar a base atualizada preservando macros se o arquivo original for .xlsm
+def salvar_base_atualizada(base, original_file_name):
     output = BytesIO()
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Sumário de Combinações"
 
-    ws.append(["Empresa", "Exportador", "Processos", "Datas", "Total"])
+    if original_file_name.endswith(".xlsm"):
+        # Carrega o arquivo original com macros
+        workbook = load_workbook(filename=original_file_name, keep_vba=True)
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            writer.book = workbook
+            writer.sheets = {ws.title: ws for ws in workbook.worksheets}
+            # Atualiza os dados na planilha "Base_Atualizada" ou cria nova
+            base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
+            writer.save()
+    else:
+        # Salva como .xlsx padrão
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
+            writer.save()
 
-    for combinacao in combinacoes:
-        ws.append([
-            combinacao['Empresa'],
-            combinacao['Exportador'],
-            ', '.join(map(str, combinacao['Processos'])),
-            ', '.join(combinacao['Datas']),
-            combinacao['Total']
-        ])
-
-    wb.save(output)
-    output.seek(0)
-    return output
-
-# Função para salvar a base atualizada (mantendo Cambio_Fechado como booleano)
-def salvar_base_atualizada(base):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
     output.seek(0)
     return output
 
@@ -128,6 +135,10 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
         (base["Exportador"] == exportador) &
         (base["Cambio_Fechado"] == False)
     ]
+
+    # Remove qualquer valor inválido novamente aqui
+    dados_filtrados = dados_filtrados.dropna(subset=["Valor"])
+
     valores_processos = dados_filtrados[["Processo", "Valor", "Data"]].values
 
     margem_min = valor_alvo - margem_fixa
@@ -137,13 +148,18 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
 
     for r in range(1, len(valores_processos) + 1):
         for combinacao in combinations(valores_processos, r):
-            soma = sum([item[1] for item in combinacao])
+            try:
+                soma = sum(float(item[1]) for item in combinacao if pd.notnull(item[1]))
+            except Exception as e:
+                st.error(f"Erro ao calcular soma: {e}")
+                continue
+
             if margem_min <= soma <= margem_max:
                 combinacoes_possiveis.append({
                     "Empresa": empresa,
                     "Exportador": exportador,
                     "Processos": [item[0] for item in combinacao],
-                    "Datas": [item[2].strftime('%Y-%m-%d') if pd.notna(item[2]) else 'Data Inválida' for item in combinacao],
+                    "Datas": [item[2].strftime('%Y-%m-%d') if pd.notnull(item[2]) else 'Data Inválida' for item in combinacao],
                     "Total": soma
                 })
                 if len(combinacoes_possiveis) >= max_combinacoes:
@@ -168,7 +184,10 @@ def exibir_abas():
                 st.error("Usuário ou senha incorretos.")
         return
 
-    file = st.sidebar.file_uploader("Faça upload do arquivo (.xlsx, .xls, .csv)", type=["xlsx", "xls", "csv"])
+    file = st.sidebar.file_uploader(
+        "Faça upload do arquivo (.xlsx, .xls, .xlsm, .csv)",
+        type=["xlsx", "xls", "xlsm", "csv"]
+    )
     if not file:
         st.warning("Por favor, carregue um arquivo para começar.")
         return
@@ -177,6 +196,7 @@ def exibir_abas():
         base = carregar_base(file)
         base = verificar_processos_dias_aberto(base)
         st.session_state.base = base
+        st.session_state.original_file_name = file.name
 
     base = st.session_state.base
 
@@ -269,11 +289,16 @@ def exibir_abas():
 
                 st.success("Processos marcados como fechados. Eles não aparecerão mais em novas combinações.")
 
-                base_atualizada = salvar_base_atualizada(st.session_state.base)
+                base_atualizada = salvar_base_atualizada(
+                    st.session_state.base,
+                    st.session_state.original_file_name
+                )
                 st.download_button(
                     "Baixar Base Atualizada",
                     base_atualizada,
-                    file_name=f"base_atualizada_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
+                    file_name=f"base_atualizada_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsm"
+                    if st.session_state.original_file_name.endswith(".xlsm") else
+                    f"base_atualizada_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
                 )
 
     elif escolha == "Notificações":
@@ -296,6 +321,3 @@ def exibir_abas():
 # Executa o aplicativo
 if __name__ == "__main__":
     exibir_abas()
-
-
-
