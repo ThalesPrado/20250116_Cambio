@@ -136,8 +136,12 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
         (base["Cambio_Fechado"] == False)
     ]
 
-    # Remove qualquer valor inválido novamente aqui
+    # Remove valores inválidos
     dados_filtrados = dados_filtrados.dropna(subset=["Valor"])
+
+    # Ignora valores muito pequenos (ex: abaixo de 1% do valor alvo)
+    limiar_minimo = valor_alvo * 0.01
+    dados_filtrados = dados_filtrados[dados_filtrados["Valor"] >= limiar_minimo]
 
     valores_processos = dados_filtrados[["Processo", "Valor", "Data"]].values
 
@@ -146,7 +150,7 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
 
     combinacoes_possiveis = []
 
-    # Limita o número de itens por combinação a no máximo 5
+    # Limita combinações a no máximo 5 processos
     max_itens_comb = min(5, len(valores_processos))
     for r in range(1, max_itens_comb + 1):
         for combinacao in combinations(valores_processos, r):
