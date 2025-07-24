@@ -129,48 +129,53 @@ def gerar_grafico_total_processos(base):
     st.pyplot(plt)
 
 # Função para encontrar combinações (ignora processos fechados)
+# Função otimizada para encontrar combinações (modo guloso e rápido)
 def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=1500, max_combinacoes=5):
-    dados_filtrados = base[
+    df = base[
         (base["Empresa"] == empresa) &
         (base["Exportador"] == exportador) &
         (base["Cambio_Fechado"] == False)
-    ]
+    ].dropna(subset=["Valor"])
 
-    # Remove valores inválidos
-    dados_filtrados = dados_filtrados.dropna(subset=["Valor"])
-
-    # Ignora valores muito pequenos (ex: abaixo de 1% do valor alvo)
-    limiar_minimo = valor_alvo * 0.01
-    dados_filtrados = dados_filtrados[dados_filtrados["Valor"] >= limiar_minimo]
-
-    valores_processos = dados_filtrados[["Processo", "Valor", "Data"]].values
+    # Ordena por valor decrescente para tentar as maiores entradas primeiro
+    df = df.sort_values(by="Valor", ascending=False).reset_index(drop=True)
 
     margem_min = valor_alvo - margem_fixa
     margem_max = valor_alvo + margem_fixa
 
-    combinacoes_possiveis = []
+    combinacoes_encontradas = []
 
-    # Limita combinações a no máximo 5 processos
-    max_itens_comb = min(5, len(valores_processos))
-    for r in range(1, max_itens_comb + 1):
-        for combinacao in combinations(valores_processos, r):
-            try:
-                soma = sum(float(item[1]) for item in combinacao if pd.notnull(item[1]))
-            except Exception as e:
-                st.error(f"Erro ao calcular soma: {e}")
+    for _ in range(len(df)):
+        soma = 0
+        processos = []
+        datas = []
+
+        for _, row in df.iterrows():
+            if soma + row["Valor"] > margem_max:
                 continue
 
+            soma += row["Valor"]
+            processos.append(row["Processo"])
+            datas.append(row["Data"].strftime('%Y-%m-%d') if pd.notnull(row["Data"]) else "Data Inválida")
+
             if margem_min <= soma <= margem_max:
-                combinacoes_possiveis.append({
+                combinacoes_encontradas.append({
                     "Empresa": empresa,
                     "Exportador": exportador,
-                    "Processos": [item[0] for item in combinacao],
-                    "Datas": [item[2].strftime('%Y-%m-%d') if pd.notnull(item[2]) else 'Data Inválida' for item in combinacao],
+                    "Processos": processos.copy(),
+                    "Datas": datas.copy(),
                     "Total": soma
                 })
-                if len(combinacoes_possiveis) >= max_combinacoes:
-                    return combinacoes_possiveis
-    return combinacoes_possiveis
+                break
+
+        # Remove os processos já usados para evitar repetição
+        if processos:
+            df = df[~df["Processo"].isin(processos)]
+
+        if len(combinacoes_encontradas) >= max_combinacoes or df.empty:
+            break
+
+    return combinacoes_encontradas
 
 # Função principal para exibição de abas no Streamlit
 def exibir_abas():
