@@ -146,7 +146,9 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
 
     combinacoes_possiveis = []
 
-    for r in range(1, len(valores_processos) + 1):
+    # Limita o número de itens por combinação a no máximo 5
+    max_itens_comb = min(5, len(valores_processos))
+    for r in range(1, max_itens_comb + 1):
         for combinacao in combinations(valores_processos, r):
             try:
                 soma = sum(float(item[1]) for item in combinacao if pd.notnull(item[1]))
