@@ -74,24 +74,20 @@ def verificar_processos_dias_aberto(base):
     return base
 
 # Função para salvar a base atualizada preservando macros se o arquivo original for .xlsm
-def salvar_base_atualizada(base, original_file_name):
+def salvar_base_atualizada(base, uploaded_file):
     output = BytesIO()
-
-    if original_file_name.endswith(".xlsm"):
-        # Carrega o arquivo original com macros
-        workbook = load_workbook(filename=original_file_name, keep_vba=True)
+    if uploaded_file.name.endswith(".xlsm"):
+        uploaded_file.seek(0)
+        workbook = load_workbook(filename=uploaded_file, keep_vba=True)
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             writer.book = workbook
             writer.sheets = {ws.title: ws for ws in workbook.worksheets}
-            # Atualiza os dados na planilha "Base_Atualizada" ou cria nova
             base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
             writer.save()
     else:
-        # Salva como .xlsx padrão
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
             writer.save()
-
     output.seek(0)
     return output
 
@@ -180,10 +176,8 @@ def encontrar_combinacoes(base, empresa, exportador, valor_alvo, margem_fixa=150
 # Função principal para exibição de abas no Streamlit
 def exibir_abas():
     st.title("Ferramenta de Fechamento de Câmbio")
-
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
-
     if not st.session_state.autenticado:
         usuario = st.text_input("Usuário:")
         senha = st.text_input("Senha:", type="password")
@@ -194,21 +188,16 @@ def exibir_abas():
             else:
                 st.error("Usuário ou senha incorretos.")
         return
-
-    file = st.sidebar.file_uploader(
-        "Faça upload do arquivo (.xlsx, .xls, .xlsm, .csv)",
-        type=["xlsx", "xls", "xlsm", "csv"]
-    )
+    file = st.sidebar.file_uploader("Faça upload do arquivo", type=["xlsx", "xls", "xlsm", "csv"])
     if not file:
-        st.warning("Por favor, carregue um arquivo para começar.")
+        st.warning("Por favor, carregue um arquivo.")
         return
-
     if "base" not in st.session_state:
         base = carregar_base(file)
         base = verificar_processos_dias_aberto(base)
         st.session_state.base = base
         st.session_state.original_file_name = file.name
-
+        st.session_state.uploaded_file = file
     base = st.session_state.base
 
     st.sidebar.subheader("Resumo Geral")
