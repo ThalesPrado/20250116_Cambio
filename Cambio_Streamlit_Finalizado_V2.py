@@ -23,38 +23,28 @@ def carregar_base(file):
     validar_arquivo(file)
     try:
         if file.name.endswith((".xlsx", ".xls", ".xlsm")):
-            # openpyxl carrega .xlsm mantendo macros
             base = pd.read_excel(file, sheet_name=None, engine="openpyxl")
             sheet = st.selectbox("Selecione a aba:", list(base.keys()))
             df = base[sheet]
         elif file.name.endswith(".csv"):
             df = pd.read_csv(file)
         else:
-            raise ValueError("Formato de arquivo não suportado. Use .xlsx, .xls, .xlsm ou .csv.")
-
-        # Garante que Cambio_Fechado seja booleano
+            raise ValueError("Formato de arquivo não suportado.")
         if "Cambio_Fechado" in df.columns:
             df["Cambio_Fechado"] = df["Cambio_Fechado"].apply(
                 lambda x: True if str(x).strip().lower() in ["feito", "true", "1"] else False
             )
         else:
             df["Cambio_Fechado"] = False
-
-        # Garante que 'Valor' seja numérico e remove inválidos
         if "Valor" in df.columns:
             df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
         else:
-            raise ValueError("A coluna 'Valor' não foi encontrada no arquivo.")
-
-        # Substitui valores inválidos na coluna 'Data' com NaT
+            raise ValueError("A coluna 'Valor' não foi encontrada.")
         if "Data" in df.columns:
             df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
         else:
-            raise ValueError("A coluna 'Data' não foi encontrada no arquivo.")
-
-        # Remove linhas com Valor inválido
+            raise ValueError("A coluna 'Data' não foi encontrada.")
         df = df.dropna(subset=["Valor"])
-
         return df
     except Exception as e:
         raise ValueError(f"Erro ao carregar o arquivo: {e}")
@@ -73,10 +63,10 @@ def verificar_processos_dias_aberto(base):
     base["Dias_Em_Aberto"] = (hoje - base["Data"]).dt.days.clip(lower=0)
     return base
 
-# Função para salvar a base atualizada preservando macros se o arquivo original for .xlsm
-def salvar_base_atualizada(base, uploaded_file):
+# Salvar base atualizada
+def salvar_base_atualizada(base, uploaded_file, filename):
     output = BytesIO()
-    if uploaded_file.name.endswith(".xlsm"):
+    if filename.endswith(".xlsm"):
         uploaded_file.seek(0)
         workbook = load_workbook(filename=uploaded_file, keep_vba=True)
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -291,6 +281,7 @@ def exibir_abas():
 
                 base_atualizada = salvar_base_atualizada(
                     st.session_state.base,
+                    st.session_state.uploaded_file,
                     st.session_state.original_file_name
                 )
                 st.download_button(
