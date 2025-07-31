@@ -66,18 +66,30 @@ def verificar_processos_dias_aberto(base):
 # Salvar base atualizada
 def salvar_base_atualizada(base, uploaded_file, filename):
     output = BytesIO()
+
     if filename.endswith(".xlsm"):
         uploaded_file.seek(0)
         workbook = load_workbook(filename=uploaded_file, keep_vba=True)
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            writer.book = workbook
-            writer.sheets = {ws.title: ws for ws in workbook.worksheets}
-            base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
-            writer.save()
+        sheet_name = "Base_Atualizada"
+
+        # Remove a aba antiga se existir
+        if sheet_name in workbook.sheetnames:
+            std = workbook[sheet_name]
+            workbook.remove(std)
+
+        # Adiciona uma nova aba com os dados atualizados
+        from openpyxl.utils.dataframe import dataframe_to_rows
+        ws = workbook.create_sheet(title=sheet_name)
+
+        for r in dataframe_to_rows(base, index=False, header=True):
+            ws.append(r)
+
+        workbook.active = workbook.sheetnames.index(sheet_name)  # Garante que uma aba esteja ativa
+        workbook.save(output)
     else:
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             base.to_excel(writer, index=False, sheet_name="Base_Atualizada")
-            writer.save()
+
     output.seek(0)
     return output
 
